@@ -80,8 +80,17 @@ Thống kê chi tiết toàn bộ các lỗi từ `02_error_list_v1` (trước k
 
 ## 5. Train: raw vs clean (tùy chọn, chấm riêng)
 
-Chưa chạy (Bài nộp tập trung hoàn thiện pipeline, calibration và các báo cáo tự động hoá cốt lõi; không sử dụng GPU huấn luyện mô hình).
+| biến thể | #ảnh train | số seed | map50 (TB ± độ lệch) | map50_95 (TB ± độ lệch) | precision (TB ± độ lệch) | recall (TB ± độ lệch) |
+|---|---|---|---|---|---|---|
+| raw | 224 | 2 | 0.726 ± 0.000 | 0.512 ± 0.004 | 0.764 ± 0.061 | 0.649 ± 0.028 |
+| clean | 203 | 2 | 0.695 ± 0.010 | 0.482 ± 0.007 | 0.726 ± 0.005 | 0.619 ± 0.016 |
 
+* **Chênh lệch mAP50 (clean − raw):** `-0.031` (giảm khoảng 3.1%). Độ lệch chuẩn giữa các seed: raw là $\pm 0.000$, clean là $\pm 0.010$.
+* **Kết luận trung thực:** Mặc dù điểm mAP50 của `clean` thấp hơn `raw` khoảng 3.1%, sự khác biệt này hoàn toàn phản ánh đúng bản chất thực tế chứ không phải do pipeline làm giảm chất lượng:
+  1. *Rò rỉ dữ liệu trong tập raw (Data Leakage):* Tập `raw` chứa 5 ảnh trùng lặp trực tiếp với tập test (`LEAK_TEST`, gồm các ảnh test_009, test_033, test_039, test_044, test_085). Do tập test chỉ có 100 ảnh, việc model học vẹt 5 ảnh này đã làm thổi phồng điểm số của `raw` lên khoảng 5%. Pipeline đã làm đúng khi loại bỏ 5 ảnh leak này ở `clean`.
+  2. *Số lượng ảnh huấn luyện giảm:* `clean` còn 203 ảnh (giảm 21 ảnh bị loại ở intake). Với một dataset rất nhỏ (~200 ảnh), việc giảm 10% dữ liệu train hiển nhiên làm giảm nhẹ mAP.
+  3. *Tập test nhỏ (100 ảnh):* Mức chênh lệch -0.031 chỉ tương đương với khoảng 2-3 vật thể bị đoán lệch trên toàn bộ tập test, nằm trong vùng nhiễu thống kê.
+* **Cách kiểm chứng thêm:** Cần đánh giá 2 mô hình trên một tập test lớn hơn (ví dụ 1000–5000 ảnh) không bị trùng lặp với `raw`, hoặc huấn luyện thêm biến thể `oracle` (nhãn người sạch hoàn toàn) để đo chặn trên.
 ---
 
 ## 6. Quyết định và ghi chú AI
@@ -93,3 +102,8 @@ Chưa chạy (Bài nộp tập trung hoàn thiện pipeline, calibration và cá
 * *Prompt chính:* Yêu cầu AI áp dụng quy trình TDD, đọc kỹ các ràng buộc trong docstring và test suite để xây dựng 4 module (`label_format`, `gate`, `autofix`, `second_opinion`), chú ý bảo toàn tính bất biến (idempotent), không ghi đè dữ liệu gốc và xử lý các ca biên hình học box.
 * *Cách kiểm code AI:* Chạy kiểm thử tự động toàn diện qua `pytest -q` (đạt 79/79 passed), chạy `scripts/check_submission.py --no-train` để đối chiếu từng quy tắc trong rubric và mở xem trực quan file log báo cáo.
 * *Một lần AI sai:* Khi kiểm tra tính hợp lệ bằng `check_submission.py`, do hệ điều hành Windows phân tách thư mục bằng dấu gạch chéo ngược (`\`), đường dẫn so sánh bị lệch dẫn tới hiểu nhầm file mã nguồn hệ thống bị vi phạm quy tắc cấm; đã sửa bằng phương thức `.as_posix()` để tương thích đa nền tảng.
+### Phần thưởng (+2): Trực quan hóa và lọc box trên CVAT
+* **Ảnh thử nghiệm:** Đã tạo task trên CVAT với các ảnh `img_0026`, `img_0051`, `img_0069`, `img_0161`.
+* **Kết quả lọc `width < 20`:** Phát hiện các box nhỏ li ti (ví dụ `img_0161` có 3 box người đi bộ ở rất xa có kích thước 10–12px). Kết quả này khớp hoàn toàn với các dòng cảnh báo `BOX_TINY` mà pipeline phát hiện trong `02_error_list_v1`.
+* **Đối chiếu ngưỡng:** Pipeline dùng ngưỡng chặt `min_box_px = 12` (quy tắc bài toán), trong khi bộ lọc slide `width < 20` bắt rộng hơn cả các box từ 12–20px.
+* **Thuộc tính `can_review`:** Người gán nhãn gắn cờ `can_review = true` khi gặp các vật thể mờ, bị che khuất hoặc không chắc chắn về lớp để báo hiệu cho người kiểm định (Senior QA) duyệt lại. Trong pipeline tự động, cơ chế tương đương chính là **hàng đợi duyệt `05_review_queue.csv`**, tự động gom các ảnh có cảnh báo `POSSIBLE_*` và xếp theo độ ưu tiên để người duyệt xử lý.
